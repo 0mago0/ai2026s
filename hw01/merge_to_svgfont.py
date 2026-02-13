@@ -56,7 +56,7 @@ def scale_and_offset_tokens(tokens, scale, offset_x, offset_y, canvas_height):
 
 def create_svg_font_with_flip():
     font_name = 'MyFont'
-    input_folder = Path('pico_5')
+    input_folder = Path('my_output_folder')
     output_dir = Path('final_font')
     output_path = output_dir / 'fontpico_py2.svg'
     
