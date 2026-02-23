@@ -2,6 +2,7 @@ import os
 import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
+import statistics
 
 def calculate_bounding_box(tokens):
     """計算路徑的邊界框"""
@@ -29,12 +30,9 @@ def calculate_bounding_box(tokens):
         return None, None, None, None
     return min_x, max_x, min_y, max_y
 
-def transform_tokens(tokens, global_min_x, global_min_y, uniform_square, canvas_size):
+def transform_tokens(tokens, global_origin_x, global_origin_y, uniform_square, canvas_size):
     """
-    用全局基準偏移，統一縮放，翻轉 Y
-    - global_min_x, global_min_y: 所有字形的全局最小值
-    - uniform_square: 全局正方形邊長
-    - canvas_size: 目標畫布大小 (300)
+    用全局基準偏移，統一縮放，翻轉 Y — 所有字形共用同一個變換，保留相對位置
     """
     scale = canvas_size / uniform_square
     
@@ -48,14 +46,39 @@ def transform_tokens(tokens, global_min_x, global_min_y, uniform_square, canvas_
         elif val:
             num = float(val)
             if is_x:
-                # 用全局 min_x 偏移，再縮放
-                x_val = (num - global_min_x) * scale
+                x_val = (num - global_origin_x) * scale
                 new_tokens.append(format(x_val, '.2f'))
                 is_x = False
             else:
-                # 用全局 min_y 偏移，縮放，翻轉
-                y_val = (num - global_min_y) * scale
+                y_val = (num - global_origin_y) * scale
                 flipped_y = canvas_size - y_val
+                new_tokens.append(format(flipped_y, '.2f'))
+                is_x = True
+    
+    return new_tokens
+
+def transform_tokens_with_shift(tokens, global_origin_x, global_origin_y, uniform_square, canvas_size, shift_x, shift_y):
+    """
+    和 transform_tokens 相同，但額外加上偏移量，讓超出邊界的字移回來
+    """
+    scale = canvas_size / uniform_square
+    
+    new_tokens = []
+    is_x = True
+    
+    for cmd, val in tokens:
+        if cmd:
+            new_tokens.append(cmd)
+            is_x = True
+        elif val:
+            num = float(val)
+            if is_x:
+                x_val = (num - global_origin_x) * scale + shift_x
+                new_tokens.append(format(x_val, '.2f'))
+                is_x = False
+            else:
+                y_val = (num - global_origin_y) * scale
+                flipped_y = canvas_size - y_val + shift_y
                 new_tokens.append(format(flipped_y, '.2f'))
                 is_x = True
     
@@ -82,12 +105,12 @@ def create_svg_font_with_flip():
     
     svg_files = sorted(list(input_folder.glob("*.svg")))
     
-    # 第一遍掃描：計算所有字形的全局 bounding box
+    # 第一遍掃描：收集每個字形的 bounding box
     print("掃描所有 SVG...")
-    global_min_x = float('inf')
-    global_max_x = float('-inf')
-    global_min_y = float('inf')
-    global_max_y = float('-inf')
+    all_min_x = []
+    all_max_x = []
+    all_min_y = []
+    all_max_y = []
     
     for svg_path in svg_files:
         try:
@@ -106,28 +129,42 @@ def create_svg_font_with_flip():
             if min_x is None:
                 continue
             
-            global_min_x = min(global_min_x, min_x)
-            global_max_x = max(global_max_x, max_x)
-            global_min_y = min(global_min_y, min_y)
-            global_max_y = max(global_max_y, max_y)
+            all_min_x.append(min_x)
+            all_max_x.append(max_x)
+            all_min_y.append(min_y)
+            all_max_y.append(max_y)
             
         except Exception as e:
             pass
     
-    # 用全局寬高的較大值作為統一正方形邊長
-    global_width = global_max_x - global_min_x
-    global_height = global_max_y - global_min_y
-    uniform_square = max(global_width, global_height)
-    print(f"全局範圍: X=[{global_min_x:.2f}, {global_max_x:.2f}], Y=[{global_min_y:.2f}, {global_max_y:.2f}]")
-    print(f"全局寬={global_width:.2f}, 高={global_height:.2f}, 統一正方形邊長={uniform_square:.2f}")
+    # 用中位數取範圍，排除歪字的影響
+    all_min_x.sort()
+    all_max_x.sort()
+    all_min_y.sort()
+    all_max_y.sort()
+    n = len(all_min_x)
     
-    # 將全局基準調整為正方形（居中較短的那邊）
-    if global_width > global_height:
-        pad = (global_width - global_height) / 2
-        global_min_y -= pad
-    else:
-        pad = (global_height - global_width) / 2
-        global_min_x -= pad
+    # 用 5th / 95th 百分位數，排除最極端的 5%
+    lo = max(0, int(n * 0.05))
+    hi = min(n - 1, int(n * 0.95))
+    
+    crop_min_x = all_min_x[lo]
+    crop_max_x = all_max_x[hi]
+    crop_min_y = all_min_y[lo]
+    crop_max_y = all_max_y[hi]
+    
+    crop_width = crop_max_x - crop_min_x
+    crop_height = crop_max_y - crop_min_y
+    uniform_square = max(crop_width, crop_height)
+    
+    # 居中較短的那邊
+    crop_center_x = (crop_min_x + crop_max_x) / 2
+    crop_center_y = (crop_min_y + crop_max_y) / 2
+    global_origin_x = crop_center_x - uniform_square / 2
+    global_origin_y = crop_center_y - uniform_square / 2
+    
+    print(f"5%-95% 範圍: X=[{crop_min_x:.2f}, {crop_max_x:.2f}], Y=[{crop_min_y:.2f}, {crop_max_y:.2f}]")
+    print(f"裁剪後寬={crop_width:.2f}, 高={crop_height:.2f}, 統一正方形邊長={uniform_square:.2f}")
     
     canvas_size = 300  # 放大到 300x300
     
@@ -160,8 +197,30 @@ def create_svg_font_with_flip():
             if min_x is None:
                 continue
             
-            # 用全局基準偏移，統一縮放，維持相對位置
-            transformed_tokens = transform_tokens(tokens, global_min_x, global_min_y, uniform_square, canvas_size)
+            # 先用全局變換計算這個字形變換後的邊界
+            scale = canvas_size / uniform_square
+            t_min_x = (min_x - global_origin_x) * scale
+            t_max_x = (max_x - global_origin_x) * scale
+            # 翻轉後 min/max 互換
+            t_min_y = canvas_size - (max_y - global_origin_y) * scale
+            t_max_y = canvas_size - (min_y - global_origin_y) * scale
+            
+            # 計算需要的偏移量，讓超出邊界的字移回來
+            shift_x = 0
+            shift_y = 0
+            if t_min_x < 0:
+                shift_x = -t_min_x  # 往右推
+            elif t_max_x > canvas_size:
+                shift_x = canvas_size - t_max_x  # 往左推
+            if t_min_y < 0:
+                shift_y = -t_min_y  # 往下推
+            elif t_max_y > canvas_size:
+                shift_y = canvas_size - t_max_y  # 往上推
+            
+            if shift_x != 0 or shift_y != 0:
+                transformed_tokens = transform_tokens_with_shift(tokens, global_origin_x, global_origin_y, uniform_square, canvas_size, shift_x, shift_y)
+            else:
+                transformed_tokens = transform_tokens(tokens, global_origin_x, global_origin_y, uniform_square, canvas_size)
             transformed_d = " ".join(transformed_tokens)
 
             # 產出 glyph 標籤
