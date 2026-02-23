@@ -10,6 +10,7 @@ import re
 import urllib.parse
 import shutil
 import argparse
+import unicodedata
 
 def main():
     parser = argparse.ArgumentParser(description='將 SVG 檔案名稱轉換為 Unicode 格式並複製到新目錄')
@@ -66,6 +67,10 @@ def main():
             decoded = urllib.parse.unquote(char_part)
         except Exception:
             decoded = char_part
+
+        # 將字串標準化為 NFC 形式 (Canonical Composition)
+        # 這確保了像 が 這樣的預組字符不會被分解成 か + combining mark
+        decoded = unicodedata.normalize('NFC', decoded)
 
         # 檢查 decoded string 是否看起來已經是 Unicode 格式 (例如 "U+4E00")
         if re.match(r'^U\+[0-9A-Fa-f]{4,}(?:_[Uu]\+[0-9A-Fa-f]{4,})*$', char_part):
