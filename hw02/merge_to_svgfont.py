@@ -1,26 +1,22 @@
 import os
 import re
+import unicodedata
 import xml.etree.ElementTree as ET
 from pathlib import Path
 import statistics
 
-def is_halfwidth(codepoint: int) -> bool:
-    """判斷 Unicode 碼位是否為明確的半形字元（ASCII、拉丁、希臘、西里爾等）"""
-    return (
-        0x0020 <= codepoint <= 0x007E or   # Basic Latin（ASCII 可見字元）
-        0x00A0 <= codepoint <= 0x00FF or   # Latin-1 Supplement
-        0x0100 <= codepoint <= 0x017F or   # Latin Extended-A
-        0x0180 <= codepoint <= 0x024F or   # Latin Extended-B
-        0x0250 <= codepoint <= 0x02AF or   # IPA Extensions
-        0x02B0 <= codepoint <= 0x02FF or   # Spacing Modifier Letters
-        0x0300 <= codepoint <= 0x036F or   # Combining Diacritical Marks
-        0x0370 <= codepoint <= 0x03FF or   # Greek and Coptic
-        0x0400 <= codepoint <= 0x04FF or   # Cyrillic
-        0x0500 <= codepoint <= 0x052F or   # Cyrillic Supplement
-        0xFF61 <= codepoint <= 0xFF9F or   # 半形片假名
-        0xFFA0 <= codepoint <= 0xFFDC or   # 半形韓文相容字母
-        0xFFE8 <= codepoint <= 0xFFEE       # 半形符號
-    )
+def eaw_is_fullwidth(codepoint: int) -> bool:
+    """
+    依據 Unicode East Asian Width 屬性判斷寬度：
+      W  (Wide)      → 全形 300
+      F  (Fullwidth) → 全形 300
+      Na (Narrow)    → 半形 150
+      H  (Halfwidth) → 半形 150
+      N  (Neutral)   → 全形 300（特殊符號預設全形）
+      A  (Ambiguous) → 全形 300（CJK 脈絡下視為全形）
+    """
+    eaw = unicodedata.east_asian_width(chr(codepoint))
+    return eaw not in ('Na', 'H')
 
 def calculate_bounding_box(tokens):
     """計算路徑的邊界框"""
@@ -200,7 +196,7 @@ def create_svg_font_with_flip():
         
         hex_code = match.group(1).upper()
         codepoint = int(hex_code, 16)
-        target_adv = HALFWIDTH_ADV if is_halfwidth(codepoint) else FULLWIDTH_ADV
+        target_adv = FULLWIDTH_ADV if eaw_is_fullwidth(codepoint) else HALFWIDTH_ADV
         glyph_name = f"icon_{hex_code}"
         unicode_entity = f"&#x{hex_code};"
         
