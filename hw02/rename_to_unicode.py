@@ -11,6 +11,7 @@ import urllib.parse
 import shutil
 import argparse
 import unicodedata
+import datetime
 
 def main():
     parser = argparse.ArgumentParser(description='將 SVG 檔案名稱轉換為 Unicode 格式並複製到新目錄')
@@ -75,6 +76,7 @@ def main():
         # 檢查 decoded string 是否看起來已經是 Unicode 格式 (例如 "U+4E00")
         if re.match(r'^U\+[0-9A-Fa-f]{4,}(?:_[Uu]\+[0-9A-Fa-f]{4,})*$', char_part):
             # 如果主要部分已經是 U+XXXX 格式，我們假設它是正確的，直接使用作為新檔名的一部分
+            new_base_without_suffix = char_part
             new_base = char_part + suffix
         else:
             # 將字元轉換為 U+XXXX 格式
@@ -90,23 +92,33 @@ def main():
                 errors.append(f'  無法處理檔案名稱: {filename}')
                 continue
             
-            new_base = '_'.join(unicode_parts) + suffix
-
-        new_filename = new_base + '.svg'
+            new_base_without_suffix = '_'.join(unicode_parts)
+            new_base = new_base_without_suffix + suffix
 
         old_path = os.path.join(input_dir, filename)
-        new_path = os.path.join(output_dir, new_filename)
 
         try:
-            shutil.copy2(old_path, new_path)
-            # print(f'  複製: {filename} -> {os.path.basename(output_dir)}/{new_filename}')
-            processed += 1
-            if processed % 100 == 0:
-                print(f"  已處理 {processed} 個檔案...")
+            if suffix:
+                # 有 -1, -2 後綴，視為重複，存到 duplicate/U+XXXX/timestamp.svg
+                dup_dir = os.path.join(output_dir, 'duplicate', new_base_without_suffix)
+                os.makedirs(dup_dir, exist_ok=True)
+                now = datetime.datetime.utcnow()
+                timestamp = now.strftime('%Y-%m-%dT%H%M%S') + f'{now.microsecond // 1000:03d}Z'
+                dup_path = os.path.join(dup_dir, timestamp + '.svg')
+                shutil.copy2(old_path, dup_path)
+                # print(f'  重複: {filename} -> duplicate/{new_base_without_suffix}/{timestamp}.svg')
+                skipped += 1
+            else:
+                new_path = os.path.join(output_dir, new_base + '.svg')
+                shutil.copy2(old_path, new_path)
+                # print(f'  複製: {filename} -> {os.path.basename(output_dir)}/{new_base}.svg')
+                processed += 1
+                if processed % 100 == 0:
+                    print(f"  已處理 {processed} 個檔案...")
         except Exception as e:
             errors.append(f'  複製失敗: {filename} -> {new_filename}: {e}')
 
-    print(f'\n完成！已將 {processed} 個檔案複製並重命名至 "{output_dir}"。')
+    print(f'\n完成！已將 {processed} 個檔案複製並重命名至 "{output_dir}"，{skipped} 個重複檔案存至 duplicate/ 子目錄。')
     if errors:
         print(f'錯誤 ({len(errors)} 個):')
         for err in errors:
