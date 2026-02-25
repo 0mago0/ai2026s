@@ -167,6 +167,7 @@ def create_svg_font_with_flip():
     print(f"裁剪後寬={crop_width:.2f}, 高={crop_height:.2f}, 統一正方形邊長={uniform_square:.2f}")
     
     canvas_size = 300  # 放大到 300x300
+    MARGIN = 15  # 每個字形左右各留的邊距（單位同 units-per-em）
     
     # 第二遍掃描：使用最小正方形處理所有 SVG
     print("處理 SVG 文件...")
@@ -206,16 +207,17 @@ def create_svg_font_with_flip():
             t_max_y = canvas_size - (min_y - global_origin_y) * scale
             
             # 計算需要的偏移量，讓超出邊界的字移回來
-            shift_x = 0
+            # 永遠將字形左緣對齊 MARGIN，消除英文字等窄字形兩側的大量空白
+            shift_x = MARGIN - t_min_x
             shift_y = 0
-            if t_min_x < 0:
-                shift_x = -t_min_x  # 往右推
-            elif t_max_x > canvas_size:
-                shift_x = canvas_size - t_max_x  # 往左推
             if t_min_y < 0:
                 shift_y = -t_min_y  # 往下推
             elif t_max_y > canvas_size:
                 shift_y = canvas_size - t_max_y  # 往上推
+            
+            # 依實際墨水寬度計算排版推進寬度
+            glyph_width = t_max_x - t_min_x
+            horiz_adv_x = MARGIN + glyph_width + MARGIN
             
             if shift_x != 0 or shift_y != 0:
                 transformed_tokens = transform_tokens_with_shift(tokens, global_origin_x, global_origin_y, uniform_square, canvas_size, shift_x, shift_y)
@@ -226,7 +228,7 @@ def create_svg_font_with_flip():
             # 產出 glyph 標籤
             glyph_def = f'    <glyph glyph-name="{glyph_name}"\n' \
                         f'      unicode="{unicode_entity}"\n' \
-                        f'      horiz-adv-x="300" d="{transformed_d}" />'
+                        f'      horiz-adv-x="{horiz_adv_x:.0f}" d="{transformed_d}" />'
             glyph_definitions.append(glyph_def)
             
         except Exception as e:
