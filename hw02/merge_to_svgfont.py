@@ -4,6 +4,35 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 import statistics
 
+def is_fullwidth(codepoint: int) -> bool:
+    """判斷 Unicode 碼位是否為全形字元（CJK、假名、注音、全形符號等）"""
+    return (
+        0x1100 <= codepoint <= 0x115F or   # Hangul Jamo
+        0x2E80 <= codepoint <= 0x2EFF or   # CJK 部首補充
+        0x2F00 <= codepoint <= 0x2FDF or   # 康熙部首
+        0x2FF0 <= codepoint <= 0x2FFF or   # 表意文字描述字符
+        0x3000 <= codepoint <= 0x303F or   # CJK 標點符號
+        0x3040 <= codepoint <= 0x309F or   # 平假名
+        0x30A0 <= codepoint <= 0x30FF or   # 片假名
+        0x3100 <= codepoint <= 0x312F or   # 注音符號
+        0x3130 <= codepoint <= 0x318F or   # 韓文相容字母
+        0x3190 <= codepoint <= 0x319F or   # 漢文訓讀
+        0x31A0 <= codepoint <= 0x31BF or   # 注音符號（閩南語、客家語）
+        0x31F0 <= codepoint <= 0x31FF or   # 片假名語音擴展
+        0x3200 <= codepoint <= 0x32FF or   # 括號 CJK 字母與月份
+        0x3300 <= codepoint <= 0x33FF or   # CJK 相容字符
+        0x3400 <= codepoint <= 0x4DBF or   # CJK 擴展 A
+        0x4E00 <= codepoint <= 0x9FFF or   # CJK 統一漢字
+        0xA000 <= codepoint <= 0xA4CF or   # 彝文音節
+        0xAC00 <= codepoint <= 0xD7AF or   # 韓文音節
+        0xF900 <= codepoint <= 0xFAFF or   # CJK 相容表意字
+        0xFE10 <= codepoint <= 0xFE1F or   # 直排標點
+        0xFE30 <= codepoint <= 0xFE4F or   # CJK 相容形式
+        0xFE50 <= codepoint <= 0xFE6F or   # 小寫變體
+        0xFF01 <= codepoint <= 0xFF60 or   # 全形 ASCII 與半形片假名（全形部分）
+        0xFFE0 <= codepoint <= 0xFFE6       # 全形符號
+    )
+
 def calculate_bounding_box(tokens):
     """計算路徑的邊界框"""
     min_x = float('inf')
@@ -168,6 +197,8 @@ def create_svg_font_with_flip():
     
     canvas_size = 300  # 放大到 300x300
     MARGIN = 15  # 每個字形左右各留的邊距（單位同 units-per-em）
+    FULLWIDTH_ADV = 300   # 全形字（CJK、假名、注音等）推進寬度
+    HALFWIDTH_ADV = 150   # 半形字（ASCII、拉丁字母等）推進寬度
     
     # 第二遍掃描：使用最小正方形處理所有 SVG
     print("處理 SVG 文件...")
@@ -179,6 +210,8 @@ def create_svg_font_with_flip():
             continue
         
         hex_code = match.group(1).upper()
+        codepoint = int(hex_code, 16)
+        target_adv = FULLWIDTH_ADV if is_fullwidth(codepoint) else HALFWIDTH_ADV
         glyph_name = f"icon_{hex_code}"
         unicode_entity = f"&#x{hex_code};"
         
@@ -207,17 +240,17 @@ def create_svg_font_with_flip():
             t_max_y = canvas_size - (min_y - global_origin_y) * scale
             
             # 計算需要的偏移量，讓超出邊界的字移回來
-            # 永遠將字形左緣對齊 MARGIN，消除英文字等窄字形兩側的大量空白
-            shift_x = MARGIN - t_min_x
+            # 在 target_adv 寬度內水平置中（全形=300，半形=150）
+            ink_width = t_max_x - t_min_x
+            shift_x = (target_adv - ink_width) / 2 - t_min_x
             shift_y = 0
             if t_min_y < 0:
                 shift_y = -t_min_y  # 往下推
             elif t_max_y > canvas_size:
                 shift_y = canvas_size - t_max_y  # 往上推
             
-            # 依實際墨水寬度計算排版推進寬度
-            glyph_width = t_max_x - t_min_x
-            horiz_adv_x = MARGIN + glyph_width + MARGIN
+            # 固定推進寬度（全形=300，半形=150）
+            horiz_adv_x = target_adv
             
             if shift_x != 0 or shift_y != 0:
                 transformed_tokens = transform_tokens_with_shift(tokens, global_origin_x, global_origin_y, uniform_square, canvas_size, shift_x, shift_y)
