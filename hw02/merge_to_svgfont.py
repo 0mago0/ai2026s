@@ -86,9 +86,10 @@ def transform_tokens(tokens, global_origin_x, global_origin_y, uniform_square, c
     
     return new_tokens
 
-def transform_tokens_with_shift(tokens, global_origin_x, global_origin_y, uniform_square, canvas_size, shift_x, shift_y):
+def transform_tokens_with_shift(tokens, global_origin_x, global_origin_y, uniform_square, canvas_size, shift_x, shift_y, glyph_scale=1.0):
     """
-    和 transform_tokens 相同，但額外加上偏移量，讓超出邊界的字移回來
+    和 transform_tokens 相同，但額外加上偏移量，讓超出邊界的字移回來。
+    glyph_scale < 1 時可等比縮小字形以適應目標寬度。
     """
     scale = canvas_size / uniform_square
     
@@ -102,11 +103,11 @@ def transform_tokens_with_shift(tokens, global_origin_x, global_origin_y, unifor
         elif val:
             num = float(val)
             if is_x:
-                x_val = (num - global_origin_x) * scale + shift_x
+                x_val = (num - global_origin_x) * scale * glyph_scale + shift_x
                 new_tokens.append(format(x_val, '.2f'))
                 is_x = False
             else:
-                y_val = (num - global_origin_y) * scale
+                y_val = (num - global_origin_y) * scale * glyph_scale
                 flipped_y = canvas_size - y_val + shift_y
                 new_tokens.append(format(flipped_y, '.2f'))
                 is_x = True
@@ -242,20 +243,35 @@ def create_svg_font_with_flip():
             # 計算需要的偏移量，讓超出邊界的字移回來
             # 在 target_adv 寬度內水平置中（全形=300，半形=150）
             ink_width = t_max_x - t_min_x
-            shift_x = (target_adv - ink_width) / 2 - t_min_x
-            shift_y = 0
-            if t_min_y < 0:
-                shift_y = -t_min_y  # 往下推
-            elif t_max_y > canvas_size:
-                shift_y = canvas_size - t_max_y  # 往上推
-            
+            max_ink_w = target_adv - 2 * MARGIN
+
+            # 若字形墨水寬度超出可用空間，等比縮小
+            glyph_scale = 1.0
+            if ink_width > max_ink_w and ink_width > 0:
+                glyph_scale = max_ink_w / ink_width
+
+            if glyph_scale < 1.0:
+                # 縮小後同時水平與垂直置中
+                t_center_x = (t_min_x + t_max_x) / 2
+                t_center_y = (t_min_y + t_max_y) / 2
+                shift_x = target_adv / 2 - t_center_x * glyph_scale
+                shift_y = (canvas_size - t_center_y) * glyph_scale - canvas_size / 2
+            else:
+                # 原始邏輯：水平置中，垂直只修正超出邊界
+                shift_x = (target_adv - ink_width) / 2 - t_min_x
+                shift_y = 0
+                if t_min_y < 0:
+                    shift_y = -t_min_y  # 往下推
+                elif t_max_y > canvas_size:
+                    shift_y = canvas_size - t_max_y  # 往上推
+
             # 固定推進寬度（全形=300，半形=150）
             horiz_adv_x = target_adv
-            
-            if shift_x != 0 or shift_y != 0:
-                transformed_tokens = transform_tokens_with_shift(tokens, global_origin_x, global_origin_y, uniform_square, canvas_size, shift_x, shift_y)
-            else:
-                transformed_tokens = transform_tokens(tokens, global_origin_x, global_origin_y, uniform_square, canvas_size)
+
+            transformed_tokens = transform_tokens_with_shift(
+                tokens, global_origin_x, global_origin_y, uniform_square,
+                canvas_size, shift_x, shift_y, glyph_scale
+            )
             transformed_d = " ".join(transformed_tokens)
 
             # 產出 glyph 標籤
